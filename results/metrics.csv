@@ -1,0 +1,6 @@
+Rank,Model,Train Accuracy,Test Accuracy,Precision,Recall,F1 Score,ROC-AUC,Training Time (s)
+1,Decision Tree,0.8617,0.8545,0.7656,0.5708,0.654,0.8983,0.05
+2,Support Vector Machine,0.8651,0.8506,0.7427,0.5816,0.6524,0.8892,65.74
+3,Logistic Regression,0.8448,0.8456,0.718,0.5912,0.6485,0.8957,0.08
+4,K-Nearest Neighbors,0.8766,0.8317,0.6623,0.6154,0.638,0.8661,0.0
+5,Naive Bayes,0.588,0.5853,0.361,0.9362,0.521,0.8415,0.01
