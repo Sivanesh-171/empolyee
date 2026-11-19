@@ -187,11 +187,48 @@ def render_eda(raw_df, cleaned_df):
     filter_sex = st.sidebar.multiselect("Filter by Sex:", options=["All", "Male", "Female"], default="All")
     filter_income = st.sidebar.multiselect("Filter by Income:", options=["All", "<=50K", ">50K"], default="All")
 
+    # --- DataFrames with separate responsibilities ---------------------------------
+    # (1) eda_df: VISUALISATION frame. Raw data with all selected filters (sex + income)
+    #     applied. It represents the population the user asked to inspect and drives
+    #     counts/distributions/target balance.
     eda_df = raw_df.copy()
     if "All" not in filter_sex and filter_sex:
         eda_df = eda_df[eda_df["sex"].isin(filter_sex)]
     if "All" not in filter_income and filter_income:
         eda_df = eda_df[eda_df["income"].isin(filter_income)]
+
+    # (2) rate_calc_df: INCOME-RATE frame. Only demographic filters (sex) are applied,
+    #     so both income classes stay present. The income filter is deliberately NOT
+    #     applied here: selecting a single class would mathematically force every
+    #     category's ">50K rate" to 100% (or 0%), which is an artefact, not a real rate.
+    rate_calc_df = raw_df.copy()
+    if "All" not in filter_sex and filter_sex:
+        rate_calc_df = rate_calc_df[rate_calc_df["sex"].isin(filter_sex)]
+
+    # (3) modeling_df: CLEANED (model-ready) frame for modelling-oriented views.
+    #     clean_data() uses underscore column names and encodes income as 0/1.
+    #     The same filters are applied so the view stays interactive.
+    modeling_df = cleaned_df.copy()
+    if "All" not in filter_sex and filter_sex:
+        modeling_df = modeling_df[modeling_df["sex"].isin(filter_sex)]
+    if "All" not in filter_income and filter_income:
+        income_codes = {"<=50K": 0, ">50K": 1}
+        selected_codes = [income_codes[val] for val in filter_income if val in income_codes]
+        if selected_codes:
+            modeling_df = modeling_df[modeling_df["income"].isin(selected_codes)]
+
+    # Duplicate count is derived from the raw data, never hard-coded.
+    duplicate_count = raw_df.duplicated().sum()
+
+    def _warn_if_empty(df, section_label):
+        """Show a warning and report True when a filtered frame has no rows."""
+        if df.empty:
+            st.warning(
+                f"⚠️ No records match the current filters for **{section_label}**. "
+                "Adjust the sidebar filters to display this view."
+            )
+            return True
+        return False
 
     eda_tabs = st.tabs([
         "1. Overview",
@@ -208,126 +245,154 @@ def render_eda(raw_df, cleaned_df):
     # Tab 1: Overview
     with eda_tabs[0]:
         st.subheader("1. Dataset Overview & Summary Statistics")
+        st.caption("Source: **raw dataset** with the current sidebar filters applied.")
         c1, c2, c3 = st.columns(3)
         c1.metric("Rows", f"{len(eda_df):,}")
         c2.metric("Columns", f"{eda_df.shape[1]}")
         c3.metric("Memory Usage", f"{eda_df.memory_usage().sum() / 1024:.1f} KB")
 
-        st.markdown("#### Sample Records (First 5 Rows)")
-        st.dataframe(eda_df.head(), use_container_width=True)
+        if not _warn_if_empty(eda_df, "Dataset Overview"):
+            st.markdown("#### Sample Records (First 5 Rows)")
+            st.dataframe(eda_df.head(), use_container_width=True)
 
-        st.markdown("#### Summary Statistics (Numeric Features)")
-        st.dataframe(eda_df.describe().round(2), use_container_width=True)
-        st.markdown(
-            '<div class="insight-box">💡 <b>Insight:</b> The average age is ~38.6 years, hours worked per week centers around 40, while capital gain and loss show extreme zero-inflation with standard deviations exceeding their means.</div>',
-            unsafe_allow_html=True,
-        )
+            st.markdown("#### Summary Statistics (Numeric Features)")
+            st.dataframe(eda_df.describe().round(2), use_container_width=True)
+            # Descriptive statistics are computed from the filtered frame so the
+            # explanation stays correct when filters change.
+            avg_age = eda_df["age"].mean()
+            med_hours = eda_df["hours.per.week"].median()
+            gain_zero = (eda_df["capital.gain"] == 0).mean() * 100
+            loss_zero = (eda_df["capital.loss"] == 0).mean() * 100
+            st.markdown(
+                f'<div class="insight-box">💡 <b>Insight:</b> In the selected population the average age is {avg_age:.1f} years and median weekly hours are {med_hours:.0f}. Capital gain ({gain_zero:.1f}% zeros) and capital loss ({loss_zero:.1f}% zeros) are strongly zero-inflated. These are descriptive summaries of the filtered sample.</div>',
+                unsafe_allow_html=True,
+            )
 
     # Tab 2: Data Quality
     with eda_tabs[1]:
         st.subheader("2. Data Quality & Missing Value Assessment")
+        st.caption("Source: **raw dataset** (unfiltered — quality checks intentionally ignore the sidebar filters).")
         col_q1, col_q2 = st.columns(2)
 
         with col_q1:
-            # Count "?" markers per column
+            # Count "?" markers per column (raw data only; cleaned data has no '?')
             q_counts = (raw_df == "?").sum()
             q_counts = q_counts[q_counts > 0].reset_index()
             q_counts.columns = ["Feature", "Missing ('?') Count"]
             q_counts["Missing %"] = (q_counts["Missing ('?') Count"] / len(raw_df) * 100).round(2)
 
-            fig_q = px.bar(
-                q_counts,
-                x="Feature",
-                y="Missing ('?') Count",
-                text="Missing %",
-                title="Missing Values ('?') by Column",
-                color="Missing ('?') Count",
-                color_continuous_scale="Reds",
-            )
-            fig_q.update_traces(texttemplate="%{text}%", textposition="outside")
-            fig_q.update_layout(margin=dict(l=20, r=20, t=40, b=20))
-            st.plotly_chart(fig_q, use_container_width=True)
-            st.markdown(
-                '<div class="insight-box">💡 <b>Insight:</b> Missingness is exclusively concentrated in 3 categorical features: occupation (5.66%), workclass (5.64%), and native.country (1.79%), which are safely imputed as "Unknown".</div>',
-                unsafe_allow_html=True,
-            )
+            if not _warn_if_empty(q_counts, "missing-value assessment"):
+                fig_q = px.bar(
+                    q_counts,
+                    x="Feature",
+                    y="Missing ('?') Count",
+                    text="Missing %",
+                    title="Missing Values ('?') by Column",
+                    color="Missing ('?') Count",
+                    color_continuous_scale="Reds",
+                )
+                fig_q.update_traces(texttemplate="%{text}%", textposition="outside")
+                fig_q.update_layout(margin=dict(l=20, r=20, t=40, b=20))
+                st.plotly_chart(fig_q, use_container_width=True)
+                q_summary = ", ".join(
+                    f"{row['Feature']} ({row['Missing %']:.2f}%)"
+                    for _, row in q_counts.sort_values("Missing %", ascending=False).iterrows()
+                )
+                st.markdown(
+                    f'<div class="insight-box">💡 <b>Insight:</b> Missingness is concentrated in {len(q_counts)} categorical features: {q_summary}. The pipeline imputes these markers as "Unknown"; that is a modelling choice, not a claim about why the values are missing.</div>',
+                    unsafe_allow_html=True,
+                )
 
         with col_q2:
             st.markdown("#### Data Quality Findings")
-            st.write(f"- **Duplicate Rows**: Found **24 identical duplicate rows** in the raw census records.")
-            st.write("- **Null Values (NaN)**: 0 (all missingness is coded as string `'?'`).")
-            st.write("- **Redundant Feature**: `education` (16 categories) maps 1-to-1 with `education.num` (integers 1–16).")
-            st.write("- **Uninformative Feature**: `fnlwgt` (census population sampling weight) is administrative, not demographic.")
-            st.write("- **Extreme Outliers**: `capital.gain` has maximum value 99,999 (99th percentile cap).")
+            if raw_df.empty:
+                st.warning("⚠️ No raw records are available for data-quality checks.")
+            else:
+                gain_zero_pct = (raw_df["capital.gain"] == 0).mean() * 100
+                st.write(f"- **Duplicate Rows**: Found **{duplicate_count:,} identical duplicate rows** in the raw census records (computed dynamically).")
+                st.write(f"- **Null Values (NaN)**: {int(raw_df.isna().sum().sum())} (missingness is coded as string `'?'`).")
+                st.write("- **Redundant Feature**: `education` (16 categories) maps 1-to-1 with `education.num` (integers 1–16).")
+                st.write("- **Uninformative Feature**: `fnlwgt` (census population sampling weight) is administrative, not a personal attribute, so it should not be read as a driver of income.")
+                st.write(f"- **Potential Outliers**: `capital.gain` reaches {int(raw_df['capital.gain'].max()):,} while {gain_zero_pct:.1f}% of values are 0. Extremes are flagged for inspection, but extreme values are not automatically data errors.")
 
     # Tab 3: Target Balance
     with eda_tabs[2]:
         st.subheader("3. Target Distribution: Income Class Balance")
-        income_counts = eda_df["income"].value_counts().reset_index()
-        income_counts.columns = ["Income Class", "Count"]
-        income_counts["Percentage"] = (income_counts["Count"] / len(eda_df) * 100).round(2)
+        st.caption("Source: **raw dataset** filtered by the sidebar selection — this is the population currently under inspection.")
+        if not _warn_if_empty(eda_df, "Target Distribution"):
+            income_counts = eda_df["income"].value_counts().reset_index()
+            income_counts.columns = ["Income Class", "Count"]
+            income_counts["Percentage"] = (income_counts["Count"] / len(eda_df) * 100).round(2)
 
-        col_t1, col_t2 = st.columns([1, 1])
-        with col_t1:
-            fig_target = px.pie(
-                income_counts,
-                names="Income Class",
-                values="Count",
-                hole=0.45,
-                title="Target Class Balance (<=50K vs >50K)",
-                color="Income Class",
-                color_discrete_map={"<=50K": "#64748b", ">50K": "#2563eb"},
-            )
-            st.plotly_chart(fig_target, use_container_width=True)
-            st.markdown(
-                '<div class="insight-box">💡 <b>Insight:</b> With 75.9% earning ≤50K and only 24.1% earning >50K, the target is substantially imbalanced (~3:1 ratio).</div>',
-                unsafe_allow_html=True,
-            )
+            col_t1, col_t2 = st.columns([1, 1])
+            with col_t1:
+                fig_target = px.pie(
+                    income_counts,
+                    names="Income Class",
+                    values="Count",
+                    hole=0.45,
+                    title="Target Class Balance (<=50K vs >50K)",
+                    color="Income Class",
+                    color_discrete_map={"<=50K": "#64748b", ">50K": "#2563eb"},
+                )
+                st.plotly_chart(fig_target, use_container_width=True)
+                high_pct = eda_df["income"].astype(str).str.contains(">50K").mean() * 100
+                balance_note = (
+                    " This reflects the active income filter, not the natural class balance of the full dataset."
+                    if "All" not in filter_income and filter_income
+                    else " The full dataset is imbalanced (~3:1)."
+                )
+                st.markdown(
+                    f'<div class="insight-box">💡 <b>Insight:</b> In the selected population, {100 - high_pct:.1f}% earn ≤50K and {high_pct:.1f}% earn >50K.{balance_note}</div>',
+                    unsafe_allow_html=True,
+                )
 
-        with col_t2:
-            st.markdown("#### Why Accuracy Alone is Misleading")
-            st.warning(
-                "⚠️ **The Accuracy Paradox**: A naive, zero-intelligence baseline model that predicts "
-                "every single applicant earns **'<=50K'** would immediately score **~75.9% accuracy**, "
-                "despite failing to identify a single high-earning individual (Recall = 0.0, F1 = 0.0)!\n\n"
-                "Therefore, in Phase 3 we prioritize **F1-Score (for >50K)** and **ROC-AUC** to fairly evaluate "
-                "genuine predictive capability on the minority class."
-            )
+            with col_t2:
+                st.markdown("#### Why Accuracy Alone is Misleading")
+                st.warning(
+                    "⚠️ **The Accuracy Paradox**: On the full (unfiltered) dataset, a naive baseline model that predicts "
+                    "every single applicant earns **'<=50K'** would immediately score **~75.9% accuracy**, "
+                    "despite failing to identify a single high-earning individual (Recall = 0.0, F1 = 0.0)!\n\n"
+                    "Therefore, in Phase 3 we prioritize **F1-Score (for >50K)** and **ROC-AUC** to fairly evaluate "
+                    "genuine predictive capability on the minority class."
+                )
 
     # Tab 4: Numeric Distributions
     with eda_tabs[3]:
         st.subheader("4. Numeric Feature Distributions & Skewness")
+        st.caption("Charts: **raw dataset** with current filters. Notes below describe the full raw dataset.")
         num_options = ["age", "education.num", "hours.per.week", "capital.gain", "capital.loss", "fnlwgt"]
         selected_num = st.selectbox("Select Numeric Feature to Inspect:", num_options, index=0)
 
-        col_n1, col_n2 = st.columns(2)
-        with col_n1:
-            fig_hist = px.histogram(
-                eda_df,
-                x=selected_num,
-                nbins=40,
-                marginal="box",
-                title=f"Histogram of {selected_num}",
-                color_discrete_sequence=["#3b82f6"],
-            )
-            st.plotly_chart(fig_hist, use_container_width=True)
+        if not _warn_if_empty(eda_df, "Numeric Distributions"):
+            col_n1, col_n2 = st.columns(2)
+            with col_n1:
+                fig_hist = px.histogram(
+                    eda_df,
+                    x=selected_num,
+                    nbins=40,
+                    marginal="box",
+                    title=f"Histogram of {selected_num}",
+                    color_discrete_sequence=["#3b82f6"],
+                )
+                st.plotly_chart(fig_hist, use_container_width=True)
 
-        with col_n2:
-            fig_box = px.box(
-                eda_df,
-                y=selected_num,
-                title=f"Boxplot of {selected_num}",
-                color_discrete_sequence=["#2563eb"],
-            )
-            st.plotly_chart(fig_box, use_container_width=True)
+            with col_n2:
+                fig_box = px.box(
+                    eda_df,
+                    y=selected_num,
+                    title=f"Boxplot of {selected_num}",
+                    color_discrete_sequence=["#2563eb"],
+                )
+                st.plotly_chart(fig_box, use_container_width=True)
 
         insights_num = {
             "age": "Age spans 17 to 90 years with a right-skewed peak around 30–45 years, reflecting active career stages.",
             "education.num": "Education years cluster heavily around 9 (High School grad), 10 (Some college), and 13 (Bachelors).",
             "hours.per.week": "A pronounced spike exists at exactly 40 hours/week (standard full-time workweek) with long tails.",
-            "capital.gain": "Capital gain is zero-inflated (91.7% are $0) with extreme values peaking at $99,999, justifying log1p transformation.",
-            "capital.loss": "Capital loss is also zero-inflated (95.3% are $0), similarly requiring log1p transformation to stabilize variance.",
-            "fnlwgt": "Sampling weight varies smoothly across census geography but shows zero conceptual or predictive relation to individual earnings.",
+            "capital.gain": "Capital gain is zero-inflated (91.7% are $0) with extremes up to $99,999. These may be genuine or capped values rather than errors; their skew motivates the log1p transform in preprocessing.",
+            "capital.loss": "Capital loss is also zero-inflated (95.3% are $0); its skew motivates the log1p transform used to stabilise variance.",
+            "fnlwgt": "This is a census sampling weight (administrative metadata), not a personal attribute. It has no clear conceptual link to an individual's earnings and is treated as metadata, not a cause of income.",
         }
         st.markdown(
             f'<div class="insight-box">💡 <b>Insight:</b> {insights_num.get(selected_num, "")}</div>',
@@ -337,6 +402,7 @@ def render_eda(raw_df, cleaned_df):
     # Tab 5: Categorical Counts
     with eda_tabs[4]:
         st.subheader("5. Categorical Feature Distributions")
+        st.caption("Source: **raw dataset** with current filters. Notes describe the full raw dataset.")
         cat_options = [
             "workclass",
             "education",
@@ -352,16 +418,17 @@ def render_eda(raw_df, cleaned_df):
         cat_counts = eda_df[selected_cat].value_counts().reset_index()
         cat_counts.columns = [selected_cat, "Count"]
 
-        fig_cat = px.bar(
-            cat_counts,
-            x=selected_cat,
-            y="Count",
-            title=f"Category Frequencies: {selected_cat}",
-            color="Count",
-            color_continuous_scale="Blues",
-        )
-        fig_cat.update_layout(xaxis_tickangle=-45)
-        st.plotly_chart(fig_cat, use_container_width=True)
+        if not _warn_if_empty(cat_counts, "Categorical Distributions"):
+            fig_cat = px.bar(
+                cat_counts,
+                x=selected_cat,
+                y="Count",
+                title=f"Category Frequencies: {selected_cat}",
+                color="Count",
+                color_continuous_scale="Blues",
+            )
+            fig_cat.update_layout(xaxis_tickangle=-45)
+            st.plotly_chart(fig_cat, use_container_width=True)
 
         insights_cat = {
             "workclass": "Private sector employment dominates the workforce (~74%), while without-pay and never-worked are negligible.",
@@ -385,50 +452,63 @@ def render_eda(raw_df, cleaned_df):
 
         with col_vt1:
             st.markdown("#### Numeric Features by Income Class")
+            st.caption("Source: **raw dataset** with current filters applied.")
             num_v = st.selectbox("Select Numeric Variable:", ["age", "education.num", "hours.per.week"], index=0)
-            fig_v = px.box(
-                eda_df,
-                x="income",
-                y=num_v,
-                color="income",
-                title=f"{num_v} Distribution by Income Class",
-                color_discrete_map={"<=50K": "#64748b", ">50K": "#2563eb"},
-            )
-            st.plotly_chart(fig_v, use_container_width=True)
-            st.markdown(
-                f'<div class="insight-box">💡 <b>Insight:</b> Individuals earning >50K are systematically older (median ~44 vs ~34), have higher education (median 12 vs 9), and work more hours weekly (median 40 vs 40, higher upper quartile).</div>',
-                unsafe_allow_html=True,
-            )
+            if not _warn_if_empty(eda_df, "Numeric Features by Income Class"):
+                fig_v = px.box(
+                    eda_df,
+                    x="income",
+                    y=num_v,
+                    color="income",
+                    title=f"{num_v} Distribution by Income Class",
+                    color_discrete_map={"<=50K": "#64748b", ">50K": "#2563eb"},
+                )
+                st.plotly_chart(fig_v, use_container_width=True)
+                medians = eda_df.groupby("income")[num_v].median()
+                if "<=50K" in medians.index and ">50K" in medians.index:
+                    st.markdown(
+                        f'<div class="insight-box">💡 <b>Insight:</b> In the selected population the median {num_v} is {medians[">50K"]:.1f} for >50K earners versus {medians["<=50K"]:.1f} for ≤50K earners. This is an observed association in this sample, not evidence that this feature causes higher income.</div>',
+                        unsafe_allow_html=True,
+                    )
+                else:
+                    st.caption(
+                        "Both income classes are needed for a meaningful comparison — adjust the income filter in the sidebar."
+                    )
 
         with col_vt2:
             st.markdown("#### Percentage Earning >50K by Categorical Feature")
+            st.caption(
+                "Rates use **both income classes** of the raw data with demographic (sex) filters preserved. "
+                "The income filter is deliberately excluded here — applying it would force every rate to 100% or 0%."
+            )
             cat_v = st.selectbox(
                 "Select Categorical Variable:",
                 ["education", "occupation", "marital.status", "relationship", "sex", "workclass"],
                 index=0,
             )
-            rate_df = (
-                eda_df.groupby(cat_v)["income"]
-                .apply(lambda s: s.astype(str).str.contains(">50K").mean() * 100)
-                .reset_index()
-            )
-            rate_df.columns = [cat_v, "High Income Rate (%)"]
-            rate_df = rate_df.sort_values(by="High Income Rate (%)", ascending=False)
+            if not _warn_if_empty(rate_calc_df, "Categorical Income Rates"):
+                rate_df = (
+                    rate_calc_df.groupby(cat_v)["income"]
+                    .apply(lambda s: s.astype(str).str.contains(">50K").mean() * 100)
+                    .reset_index()
+                )
+                rate_df.columns = [cat_v, "High Income Rate (%)"]
+                rate_df = rate_df.sort_values(by="High Income Rate (%)", ascending=False)
 
-            fig_rate = px.bar(
-                rate_df,
-                x=cat_v,
-                y="High Income Rate (%)",
-                title=f"% Earning >50K by {cat_v}",
-                color="High Income Rate (%)",
-                color_continuous_scale="Viridis",
-            )
-            fig_rate.update_layout(xaxis_tickangle=-45)
-            st.plotly_chart(fig_rate, use_container_width=True)
-            st.markdown(
-                f'<div class="insight-box">💡 <b>Insight:</b> Higher education levels (Doctorate >70%, Prof-school >70%) and Executive/Professional roles dramatically amplify probability of earning >$50K.</div>',
-                unsafe_allow_html=True,
-            )
+                fig_rate = px.bar(
+                    rate_df,
+                    x=cat_v,
+                    y="High Income Rate (%)",
+                    title=f"% Earning >50K by {cat_v}",
+                    color="High Income Rate (%)",
+                    color_continuous_scale="Viridis",
+                )
+                fig_rate.update_layout(xaxis_tickangle=-45)
+                st.plotly_chart(fig_rate, use_container_width=True)
+                st.markdown(
+                    f'<div class="insight-box">💡 <b>Insight:</b> Categories at the top of this chart have a higher <i>observed</i> share of >50K earners within {cat_v}. This is an unadjusted association in the 1994 sample: it does not prove causation, and a group-level rate is not a prediction for any individual.</div>',
+                    unsafe_allow_html=True,
+                )
 
     # Tab 7: Feature Correlations & Overlap
     with eda_tabs[6]:
@@ -437,32 +517,41 @@ def render_eda(raw_df, cleaned_df):
 
         with col_c1:
             st.markdown("#### Pearson Correlation Heatmap")
-            numeric_cols = ["age", "education.num", "hours.per.week", "capital.gain", "capital.loss"]
-            corr = eda_df[numeric_cols].corr()
+            st.caption(
+                "Source: **cleaned, model-ready dataset** (numeric features with log-transformed capital columns). "
+                "Correlation measures linear association only — it does not imply causation."
+            )
+            # Modelling-oriented view: use the cleaned frame (underscore column names,
+            # log-transformed capital features) rather than the raw visualisation frame.
+            numeric_cols = ["age", "education_num", "hours_per_week", "capital_gain", "capital_loss"]
+            if not _warn_if_empty(modeling_df, "Correlation Heatmap"):
+                corr = modeling_df[numeric_cols].corr()
 
-            fig_corr = px.imshow(
-                corr,
-                text_auto=".2f",
-                aspect="auto",
-                title="Correlation Matrix of Numeric Features",
-                color_continuous_scale="RdBu_r",
-                zmin=-1,
-                zmax=1,
-            )
-            st.plotly_chart(fig_corr, use_container_width=True)
-            st.markdown(
-                '<div class="insight-box">💡 <b>Insight:</b> Numeric features show low linear collinearity with each other; education.num and age show the highest positive correlation with weekly work hours (r ~ 0.15).</div>',
-                unsafe_allow_html=True,
-            )
+                fig_corr = px.imshow(
+                    corr,
+                    text_auto=".2f",
+                    aspect="auto",
+                    title="Correlation Matrix of Numeric Features (Cleaned Data)",
+                    color_continuous_scale="RdBu_r",
+                    zmin=-1,
+                    zmax=1,
+                )
+                st.plotly_chart(fig_corr, use_container_width=True)
+                st.markdown(
+                    '<div class="insight-box">💡 <b>Insight:</b> In the full cleaned dataset all pairwise linear correlations are weak (|r| ≤ 0.15); the strongest is between education_num and hours_per_week (r ≈ 0.15). Weak linear correlation does not rule out non-linear relationships, and correlation never establishes causation.</div>',
+                    unsafe_allow_html=True,
+                )
 
         with col_c2:
             st.markdown("#### Redundancy: Education vs Education.num")
-            edu_map = eda_df[["education", "education.num"]].drop_duplicates().sort_values("education.num")
-            st.dataframe(edu_map.reset_index(drop=True), use_container_width=True)
-            st.markdown(
-                '<div class="insight-box">💡 <b>Insight:</b> There is a strict 1-to-1 monotonic mapping between "education" and "education.num". Dropping the string column preserves 100% of the information while eliminating collinearity.</div>',
-                unsafe_allow_html=True,
-            )
+            st.caption("Source: **raw dataset** with current filters applied.")
+            if not _warn_if_empty(eda_df, "Education Mapping"):
+                edu_map = eda_df[["education", "education.num"]].drop_duplicates().sort_values("education.num")
+                st.dataframe(edu_map.reset_index(drop=True), use_container_width=True)
+                st.markdown(
+                    '<div class="insight-box">💡 <b>Insight:</b> There is a strict 1-to-1 monotonic mapping between "education" and "education.num". Keeping only the numeric version preserves the same ordering while removing a redundant duplicate feature.</div>',
+                    unsafe_allow_html=True,
+                )
 
     # Tab 8: Multi-Feature Views
     with eda_tabs[7]:
@@ -471,64 +560,83 @@ def render_eda(raw_df, cleaned_df):
 
         with col_m1:
             st.markdown("#### Age vs. Hours Per Week (Colored by Income)")
-            sample_df = eda_df.sample(n=min(2500, len(eda_df)), random_state=42)
-            fig_scatter = px.scatter(
-                sample_df,
-                x="age",
-                y="hours.per.week",
-                color="income",
-                title="Age vs. Hours/Week (Sampled N=2,500)",
-                opacity=0.6,
-                color_discrete_map={"<=50K": "#94a3b8", ">50K": "#2563eb"},
-            )
-            st.plotly_chart(fig_scatter, use_container_width=True)
-            st.markdown(
-                '<div class="insight-box">💡 <b>Insight:</b> High earners cluster tightly between ages 35–55 who work 40 to 60 hours per week; high income is exceptionally rare among workers under 25 or working under 30 hours.</div>',
-                unsafe_allow_html=True,
-            )
+            st.caption("Source: **raw dataset** with current filters applied (random sample for readability).")
+            if not _warn_if_empty(eda_df, "Age vs Hours Scatter"):
+                sample_df = eda_df.sample(n=min(2500, len(eda_df)), random_state=42)
+                sample_size = len(sample_df)
+                fig_scatter = px.scatter(
+                    sample_df,
+                    x="age",
+                    y="hours.per.week",
+                    color="income",
+                    title=f"Age vs. Hours/Week (Sampled N={sample_size:,})",
+                    opacity=0.6,
+                    color_discrete_map={"<=50K": "#94a3b8", ">50K": "#2563eb"},
+                )
+                st.plotly_chart(fig_scatter, use_container_width=True)
+                st.markdown(
+                    '<div class="insight-box">💡 <b>Insight:</b> In this sample, >50K earners are concentrated around ages 35–55 and 40–60 weekly hours, and are rare among workers under 25 or below 30 hours. This is a visual association in the sampled data, not a causal rule or an individual prediction.</div>',
+                    unsafe_allow_html=True,
+                )
 
         with col_m2:
             st.markdown("#### High Income Rate by Sex and Education Level")
+            st.caption(
+                "Rates use **both income classes** with demographic filters preserved; the income filter is excluded "
+                "so the percentages remain the true observed rates rather than 100%/0% artefacts."
+            )
             edu_order = [
                 "Preschool", "1st-4th", "5th-6th", "7th-8th", "9th", "10th", "11th", "12th",
                 "HS-grad", "Some-college", "Assoc-voc", "Assoc-acdm", "Bachelors", "Masters",
                 "Prof-school", "Doctorate",
             ]
-            rate_sex_edu = (
-                eda_df.groupby(["education", "sex"])["income"]
-                .apply(lambda s: s.astype(str).str.contains(">50K").mean() * 100)
-                .reset_index()
-            )
-            rate_sex_edu.columns = ["education", "sex", "High Income Rate (%)"]
+            if not _warn_if_empty(rate_calc_df, "Income Rate by Sex & Education"):
+                rate_sex_edu = (
+                    rate_calc_df.groupby(["education", "sex"])["income"]
+                    .apply(lambda s: s.astype(str).str.contains(">50K").mean() * 100)
+                    .reset_index()
+                )
+                rate_sex_edu.columns = ["education", "sex", "High Income Rate (%)"]
 
-            fig_sex_edu = px.bar(
-                rate_sex_edu,
-                x="education",
-                y="High Income Rate (%)",
-                color="sex",
-                barmode="group",
-                category_orders={"education": edu_order},
-                title="Income Rate (%) across Sex & Education",
-                color_discrete_map={"Male": "#2563eb", "Female": "#ec4899"},
-            )
-            fig_sex_edu.update_layout(xaxis_tickangle=-45)
-            st.plotly_chart(fig_sex_edu, use_container_width=True)
-            st.markdown(
-                '<div class="insight-box">💡 <b>Insight:</b> While higher degrees multiply high-earning rates for both sexes, males experienced substantially higher probability of earning >50K across every single educational tier in the 1994 census.</div>',
-                unsafe_allow_html=True,
-            )
+                fig_sex_edu = px.bar(
+                    rate_sex_edu,
+                    x="education",
+                    y="High Income Rate (%)",
+                    color="sex",
+                    barmode="group",
+                    category_orders={"education": edu_order},
+                    title="Income Rate (%) across Sex & Education",
+                    color_discrete_map={"Male": "#2563eb", "Female": "#ec4899"},
+                )
+                fig_sex_edu.update_layout(xaxis_tickangle=-45)
+                st.plotly_chart(fig_sex_edu, use_container_width=True)
+
+                # Compare rates only when both sexes are present under the current filter.
+                pivot = rate_sex_edu.pivot(index="education", columns="sex", values="High Income Rate (%)")
+                if {"Male", "Female"}.issubset(pivot.columns):
+                    higher_count = int((pivot["Male"] > pivot["Female"]).sum())
+                    tier_count = len(pivot)
+                    sex_note = (
+                        f"Males show a higher observed rate in {higher_count} of {tier_count} education tiers."
+                    )
+                else:
+                    sex_note = "Select both sexes to compare their observed rates by education."
+                st.markdown(
+                    f'<div class="insight-box">💡 <b>Insight:</b> In the full 1994 sample, higher degrees are associated with higher observed >50K rates for both sexes. {sex_note} These are <i>unadjusted</i> group rates reflecting historical labour-market and demographic patterns — not a causal effect of sex or education, and not a prediction for any individual.</div>',
+                    unsafe_allow_html=True,
+                )
 
     # Tab 9: Summary & Decisions
     with eda_tabs[8]:
         st.subheader("9. Summary of Key EDA Findings & Justified Preprocessing")
         st.markdown(
-            """
+            f"""
             | # | EDA Observation | Preprocessing Decision Justified |
             |---|---|---|
-            | **1** | Missing values are coded as `'?'` in 3 categorical features | Replaced with `'Unknown'` category so models retain all 32,500+ records without loss |
-            | **2** | 24 duplicate rows detected in census data | Dropped duplicates to prevent memorization and redundant sample weighting |
+            | **1** | Missing values are coded as `'?'` in 3 categorical features | Replaced with `'Unknown'` category so models retain all {len(raw_df):,} records without loss |
+            | **2** | {duplicate_count:,} duplicate rows detected in census data | Dropped duplicates to prevent memorization and redundant sample weighting |
             | **3** | `education` has exact 1-to-1 mapping with `education.num` | Dropped string column `education` and kept `education_num` to remove redundancy |
-            | **4** | `fnlwgt` is a census demographic sampling weight | Dropped `fnlwgt` as it has no causal relation to individual personal earnings |
+            | **4** | `fnlwgt` is a census demographic sampling weight | Dropped `fnlwgt` because it is administrative metadata, not a personal attribute; it should not be used to explain or predict individual earnings |
             | **5** | Over 89% of participants are from the United States | Grouped `native_country` into `'United-States'` vs `'Other'` to avoid high-cardinality noise |
             | **6** | `capital.gain` and `capital.loss` are 90%+ zeros and heavily right-skewed | Applied `log1p` transformation to compress extreme ranges and stabilize variance |
             | **7** | Target ratio is ~76% / 24% (imbalanced) | Used stratified 80/20 train/test split; benchmarked models using F1-score & ROC-AUC |
@@ -568,10 +676,13 @@ def render_preprocessing(raw_df, cleaned_df):
     st.divider()
 
     st.subheader("Detailed Pipeline Steps")
+    # Counts are computed from the current data so the text stays correct if the dataset changes.
+    missing_markers = int((raw_df == "?").sum().sum())
+    duplicate_count = raw_df.duplicated().sum()
     steps = [
         ("1. Header Standardization", "Replaced dots with underscores (e.g., `education.num` ➔ `education_num`, `marital.status` ➔ `marital_status`)."),
-        ("2. Missing Value Imputation", "Identified 4,262 `'?'` text markers across workclass, occupation, and native-country and encoded as `'Unknown'`."),
-        ("3. Deduplication", "Detected and dropped 24 duplicate records, preserving 32,537 unique observations."),
+        ("2. Missing Value Imputation", f"Identified {missing_markers:,} `'?'` text markers across workclass, occupation, and native-country and encoded as `'Unknown'`."),
+        ("3. Deduplication", f"Detected and dropped {duplicate_count:,} duplicate records, preserving {len(cleaned_df):,} unique observations."),
         ("4. Feature Selection", "Dropped `fnlwgt` (census weighting) and redundant text `education` (retained `education_num`)."),
         ("5. Categorical Aggregation", "Consolidated `native_country` into `'United-States'` and `'Other'` to eliminate low-sample sparse categories."),
         ("6. Variance Stabilization (log1p)", "Applied `np.log1p(x) = ln(1 + x)` on `capital_gain` and `capital_loss` to dampen zero-inflation and severe skewness."),
