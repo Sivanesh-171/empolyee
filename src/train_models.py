@@ -26,6 +26,7 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.tree import DecisionTreeClassifier
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.svm import SVC
+from sklearn.calibration import CalibratedClassifierCV
 from sklearn.naive_bayes import GaussianNB
 from sklearn.metrics import (
     accuracy_score,
@@ -46,7 +47,13 @@ def get_models():
         "Logistic Regression": LogisticRegression(max_iter=1000, random_state=42),
         "Decision Tree": DecisionTreeClassifier(max_depth=8, min_samples_leaf=20, random_state=42),
         "K-Nearest Neighbors": KNeighborsClassifier(n_neighbors=7, n_jobs=-1),
-        "Support Vector Machine": SVC(kernel="rbf", probability=True, random_state=42),
+        # scikit-learn 1.9 deprecated SVC(probability=True): fit() emits a FutureWarning
+        # and the parameter is removed in 1.11. The recommended replacement performs the
+        # same Platt calibration and still exposes predict_proba() for ROC-AUC / the live
+        # predictor, so no metric or downstream code has to change.
+        "Support Vector Machine": CalibratedClassifierCV(
+            SVC(kernel="rbf", random_state=42), ensemble=False
+        ),
         "Naive Bayes": GaussianNB(),
     }
 
