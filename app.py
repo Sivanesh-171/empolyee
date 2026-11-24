@@ -51,6 +51,32 @@ def get_metrics():
 
 
 @st.cache_data
+def get_baseline_metrics():
+    """Load baseline 5-fold cross-validation metrics table."""
+    if os.path.exists("results/baseline_cv_metrics.csv"):
+        return pd.read_csv("results/baseline_cv_metrics.csv", index_col="Baseline Rank")
+    return None
+
+
+@st.cache_data
+def get_tuning_metrics():
+    """Load GridSearchCV vs RandomizedSearchCV comparative metrics table."""
+    if os.path.exists("results/tuned_model_comparison.csv"):
+        return pd.read_csv("results/tuned_model_comparison.csv")
+    return None
+
+
+@st.cache_data
+def get_best_hyperparameters():
+    """Load JSON metadata of optimal hyperparameters for all models."""
+    if os.path.exists("results/best_hyperparameters.json"):
+        import json
+        with open("results/best_hyperparameters.json", "r") as f:
+            return json.load(f)
+    return {}
+
+
+@st.cache_data
 def get_confusion_matrices():
     """Load precomputed confusion matrices."""
     return joblib.load("results/confusion_matrices.joblib")
@@ -64,10 +90,10 @@ def get_roc_curves():
 
 @st.cache_resource
 def load_all_models():
-    """Load all 5 pre-trained models from models directory."""
+    """Load all 5 pre-trained tuned model pipelines from models directory."""
     models = {
-        "Decision Tree": joblib.load("models/decision_tree.joblib"),
         "Support Vector Machine": joblib.load("models/svm.joblib"),
+        "Decision Tree": joblib.load("models/decision_tree.joblib"),
         "Logistic Regression": joblib.load("models/logistic_regression.joblib"),
         "K-Nearest Neighbors": joblib.load("models/knn.joblib"),
         "Naive Bayes": joblib.load("models/naive_bayes.joblib"),
@@ -76,9 +102,19 @@ def load_all_models():
 
 
 @st.cache_resource
+def load_best_pipeline():
+    """Load the overall winning trained Scikit-learn Pipeline."""
+    if os.path.exists("models/best_pipeline.joblib"):
+        return joblib.load("models/best_pipeline.joblib")
+    return joblib.load("models/svm.joblib")
+
+
+@st.cache_resource
 def load_fitted_preprocessor():
-    """Load fitted preprocessor bundle for live inference."""
-    return joblib.load("models/preprocessor.joblib")
+    """Load fitted preprocessor bundle for backward compatibility."""
+    if os.path.exists("models/preprocessor.joblib"):
+        return joblib.load("models/preprocessor.joblib")
+    return None
 
 
 # ---------------------------------------------------------
@@ -589,146 +625,285 @@ def render_preprocessing(raw_df, cleaned_df):
 # Page 4: Model Comparison
 # ---------------------------------------------------------
 def render_model_comparison(metrics_df, confusion_matrices, roc_curves):
-    st.title("🏆 Supervised Model Benchmarking")
-    st.write("Examine the fair comparison of all 5 supervised machine learning models on the identical test split.")
+    st.title("🏆 Supervised Model Benchmarking & Optimization")
+    st.write(
+        "Explore baseline cross-validation, hyperparameter tuning (GridSearch vs. RandomSearch), "
+        "and final generalization performance on the untouched test partition."
+    )
 
-    best_model_name = metrics_df.iloc[0]["Model"]
-    best_f1 = metrics_df.iloc[0]["F1 Score"]
-    best_roc = metrics_df.iloc[0]["ROC-AUC"]
-    best_acc = metrics_df.iloc[0]["Test Accuracy"]
+    baseline_df = get_baseline_metrics()
+    tuning_df = get_tuning_metrics()
+    best_params_dict = get_best_hyperparameters()
 
-    # Best Model Highlight Card
-    st.markdown(
-        f"""
-        <div class="best-card">
-            <h2>🥇 Top Ranked Model: {best_model_name}</h2>
-            <p style="font-size: 1.1rem; margin-bottom: 8px;">
-                Achieved top performance ranked by <b>F1-Score ({best_f1:.4f})</b> and <b>ROC-AUC ({best_roc:.4f})</b> on the test set.
-            </p>
-            <div style="display: flex; gap: 20px; flex-wrap: wrap;">
-                <span><b>Test Accuracy:</b> {best_acc*100:.2f}%</span>
-                <span><b>Precision:</b> {metrics_df.iloc[0]['Precision']:.4f}</span>
-                <span><b>Recall:</b> {metrics_df.iloc[0]['Recall']:.4f}</span>
-                <span><b>Training Time:</b> {metrics_df.iloc[0]['Training Time (s)']}s</span>
+    comp_tabs = st.tabs([
+        "🎯 1. Final Holdout Test Benchmark",
+        "📊 2. Baseline 5-Fold Cross-Validation",
+        "⚙️ 3. Hyperparameter Optimization Cockpit",
+    ])
+
+    # ---------------------------------------------------------
+    # TAB 1: FINAL HOLDOUT TEST BENCHMARK
+    # ---------------------------------------------------------
+    with comp_tabs[0]:
+        st.subheader("Final Holdout Evaluation (Untouched Test Set — 6,508 Records)")
+
+        # Spotlight Winner Card
+        st.markdown(
+            """
+            <div class="best-card">
+                <h2>🥇 Overall Winning Model: Support Vector Machine (RBF)</h2>
+                <p style="font-size: 1.1rem; margin-bottom: 8px;">
+                    Selected strictly based on highest <b>5-Fold Cross-Validated F1-Score (0.6749)</b> and <b>CV ROC-AUC (0.8918)</b> during hyperparameter optimization.
+                </p>
+                <div style="display: flex; gap: 20px; flex-wrap: wrap;">
+                    <span><b>Optimal Search:</b> GridSearchCV</span>
+                    <span><b>CV F1-Score:</b> 0.6749</span>
+                    <span><b>Holdout Test F1:</b> 0.6533</span>
+                    <span><b>Holdout Test Accuracy:</b> 84.80%</span>
+                    <span><b>Optimal Hyperparameters:</b> C=10.0, gamma='scale', kernel='rbf'</span>
+                </div>
             </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    st.subheader("Official Performance Ranking Table")
-    st.dataframe(
-        metrics_df.style.format(
-            {
-                "Train Accuracy": "{:.4f}",
-                "Test Accuracy": "{:.4f}",
-                "Precision": "{:.4f}",
-                "Recall": "{:.4f}",
-                "F1 Score": "{:.4f}",
-                "ROC-AUC": "{:.4f}",
-                "Training Time (s)": "{:.2f}",
-            }
+            """,
+            unsafe_allow_html=True,
         )
-        .highlight_max(
-            subset=["Test Accuracy", "Precision", "Recall", "F1 Score", "ROC-AUC"],
-            color="#bbf7d0",
+
+        st.info(
+            "💡 **Model Selection & Trade-Off Analysis**: "
+            "In strict machine learning practice, model selection is decided purely by **validation cross-validation performance** "
+            "(where SVM achieved **0.6749** F1 vs Decision Tree's **0.6712** F1). "
+            "On the holdout test set, Decision Tree generalized slightly higher (**0.6716** F1) while training **500× faster** (0.20s vs 106.97s), "
+            "making Decision Tree an attractive production alternative where inference throughput or compute budget is prioritized."
         )
-        .highlight_min(
-            subset=["Training Time (s)"],
-            color="#dbeafe",
-        ),
-        use_container_width=True,
-    )
 
-    st.divider()
+        st.subheader("Official Holdout Test Performance Ranking Table")
+        st.dataframe(
+            metrics_df.style.format(
+                {
+                    "Train Accuracy": "{:.4f}",
+                    "Test Accuracy": "{:.4f}",
+                    "Precision": "{:.4f}",
+                    "Recall": "{:.4f}",
+                    "F1 Score": "{:.4f}",
+                    "ROC-AUC": "{:.4f}",
+                    "Training Time (s)": "{:.2f}",
+                }
+            )
+            .highlight_max(
+                subset=["Test Accuracy", "Precision", "Recall", "F1 Score", "ROC-AUC"],
+                color="#bbf7d0",
+            )
+            .highlight_min(
+                subset=["Training Time (s)"],
+                color="#dbeafe",
+            ),
+            use_container_width=True,
+        )
 
-    # Visual Comparison: Grouped Bar Chart
-    st.subheader("Comparative Metrics Across All 5 Models")
-    metrics_to_plot = ["Test Accuracy", "Precision", "Recall", "F1 Score", "ROC-AUC"]
-    fig_grouped = px.bar(
-        metrics_df,
-        x="Model",
-        y=metrics_to_plot,
-        barmode="group",
-        title="Side-by-Side Model Evaluation Metrics",
-        color_discrete_sequence=px.colors.qualitative.Set2,
-    )
-    fig_grouped.update_layout(yaxis_range=[0, 1.05], margin=dict(l=20, r=20, t=40, b=20))
-    st.plotly_chart(fig_grouped, use_container_width=True)
+        st.divider()
 
-    col1, col2 = st.columns(2)
-
-    with col1:
-        st.subheader("Overfitting Diagnostic: Train vs Test Accuracy")
-        fig_overfit = px.bar(
+        # Side-by-Side Holdout Bar Chart
+        st.subheader("Holdout Test Metrics Across All 5 Tuned Models")
+        metrics_to_plot = ["Test Accuracy", "Precision", "Recall", "F1 Score", "ROC-AUC"]
+        fig_grouped = px.bar(
             metrics_df,
             x="Model",
-            y=["Train Accuracy", "Test Accuracy"],
+            y=metrics_to_plot,
             barmode="group",
-            title="Generalization Gap (Train vs. Test Accuracy)",
-            color_discrete_map={"Train Accuracy": "#94a3b8", "Test Accuracy": "#2563eb"},
+            title="Holdout Test Evaluation Metrics (Tuned Pipelines)",
+            color_discrete_sequence=px.colors.qualitative.Set2,
         )
-        fig_overfit.update_layout(yaxis_range=[0.5, 1.0])
-        st.plotly_chart(fig_overfit, use_container_width=True)
-        st.caption("A small gap indicates healthy generalization; a large positive gap signals overfitting.")
+        fig_grouped.update_layout(yaxis_range=[0, 1.05], margin=dict(l=20, r=20, t=40, b=20))
+        st.plotly_chart(fig_grouped, use_container_width=True)
 
-    with col2:
-        st.subheader("All 5 Overlaid ROC Curves")
-        fig_roc = go.Figure()
-        # Diagonal baseline
-        fig_roc.add_trace(
-            go.Scatter(
-                x=[0, 1], y=[0, 1], mode="lines", name="Random Chance (AUC = 0.50)", line=dict(dash="dash", color="grey")
+        col1, col2 = st.columns(2)
+        with col1:
+            st.subheader("Overfitting Diagnostic: Train vs Test Accuracy")
+            fig_overfit = px.bar(
+                metrics_df,
+                x="Model",
+                y=["Train Accuracy", "Test Accuracy"],
+                barmode="group",
+                title="Generalization Gap (Trained vs. Holdout Test Accuracy)",
+                color_discrete_map={"Train Accuracy": "#94a3b8", "Test Accuracy": "#2563eb"},
             )
-        )
-        colors = ["#2563eb", "#10b981", "#f59e0b", "#8b5cf6", "#ef4444"]
-        for idx, (model_name, rdata) in enumerate(roc_curves.items()):
+            fig_overfit.update_layout(yaxis_range=[0.5, 1.0])
+            st.plotly_chart(fig_overfit, use_container_width=True)
+            st.caption("A tight gap indicates healthy generalization; large gaps indicate memorization.")
+
+        with col2:
+            st.subheader("Overlaid Holdout Test ROC Curves")
+            fig_roc = go.Figure()
             fig_roc.add_trace(
                 go.Scatter(
-                    x=rdata["fpr"],
-                    y=rdata["tpr"],
-                    mode="lines",
-                    name=f"{model_name} (AUC = {rdata['roc_auc']:.4f})",
-                    line=dict(color=colors[idx % len(colors)], width=2),
+                    x=[0, 1], y=[0, 1], mode="lines", name="Random Chance (AUC = 0.50)", line=dict(dash="dash", color="grey")
                 )
             )
-        fig_roc.update_layout(
-            title="ROC Curves on Test Partition",
-            xaxis_title="False Positive Rate",
-            yaxis_title="True Positive Rate",
-            legend=dict(x=0.55, y=0.15),
-            margin=dict(l=20, r=20, t=40, b=20),
+            colors = ["#2563eb", "#10b981", "#f59e0b", "#8b5cf6", "#ef4444"]
+            for idx, (model_name, rdata) in enumerate(roc_curves.items()):
+                fig_roc.add_trace(
+                    go.Scatter(
+                        x=rdata["fpr"],
+                        y=rdata["tpr"],
+                        mode="lines",
+                        name=f"{model_name} (AUC = {rdata['roc_auc']:.4f})",
+                        line=dict(color=colors[idx % len(colors)], width=2),
+                    )
+                )
+            fig_roc.update_layout(
+                title="ROC Curves on Test Partition",
+                xaxis_title="False Positive Rate",
+                yaxis_title="True Positive Rate",
+                legend=dict(x=0.55, y=0.15),
+                margin=dict(l=20, r=20, t=40, b=20),
+            )
+            st.plotly_chart(fig_roc, use_container_width=True)
+
+        st.divider()
+
+        # Confusion Matrix Inspector
+        st.subheader("Interactive Confusion Matrix Inspector")
+        col_cm1, col_cm2 = st.columns([1, 2])
+        with col_cm1:
+            selected_cm_model = st.selectbox(
+                "Select Model to Inspect Confusion Matrix:", list(confusion_matrices.keys())
+            )
+            cm_norm = st.checkbox("Show as Percentage of Actual Class (%)", value=False)
+
+        with col_cm2:
+            raw_cm = confusion_matrices[selected_cm_model]
+            if cm_norm:
+                display_cm = (raw_cm / raw_cm.sum(axis=1, keepdims=True) * 100).round(1)
+                text_template = "%{z:.1f}%"
+            else:
+                display_cm = raw_cm
+                text_template = "%{z:,}"
+
+            fig_cm = px.imshow(
+                display_cm,
+                labels=dict(x="Predicted Income Class", y="Actual Income Class", color="Count"),
+                x=["<=50K (0)", ">50K (1)"],
+                y=["<=50K (0)", ">50K (1)"],
+                title=f"Confusion Matrix: {selected_cm_model}",
+                color_continuous_scale="Blues",
+            )
+            fig_cm.update_traces(text=display_cm, texttemplate=text_template)
+            st.plotly_chart(fig_cm, use_container_width=True)
+
+    # ---------------------------------------------------------
+    # TAB 2: BASELINE 5-FOLD CROSS-VALIDATION
+    # ---------------------------------------------------------
+    with comp_tabs[1]:
+        st.subheader("Baseline 5-Fold Stratified Cross-Validation Benchmark")
+        st.write(
+            "Before hyperparameter tuning, all 5 models were evaluated inside Scikit-learn Pipelines "
+            "using `StratifiedKFold(n_splits=5, shuffle=True, random_state=42)`. Preprocessing was fitted strictly "
+            "on the 4 training folds with zero data leakage to the validation fold."
         )
-        st.plotly_chart(fig_roc, use_container_width=True)
 
-    st.divider()
+        if baseline_df is not None:
+            st.dataframe(
+                baseline_df.style.format(
+                    {
+                        "Mean CV Accuracy": "{:.4f}",
+                        "Mean CV Precision": "{:.4f}",
+                        "Mean CV Recall": "{:.4f}",
+                        "Mean CV F1-Score": "{:.4f}",
+                        "Std CV F1-Score": "{:.4f}",
+                        "Mean CV ROC-AUC": "{:.4f}",
+                        "Mean Train Accuracy": "{:.4f}",
+                        "CV Execution Time (s)": "{:.2f}",
+                    }
+                )
+                .highlight_max(
+                    subset=["Mean CV Accuracy", "Mean CV Precision", "Mean CV Recall", "Mean CV F1-Score", "Mean CV ROC-AUC"],
+                    color="#bbf7d0",
+                ),
+                use_container_width=True,
+            )
 
-    # Interactive Confusion Matrix Picker
-    st.subheader("Confusion Matrix Inspector")
-    col_cm1, col_cm2 = st.columns([1, 2])
-    with col_cm1:
-        selected_cm_model = st.selectbox("Select Model to Inspect Confusion Matrix:", list(confusion_matrices.keys()))
-        cm_norm = st.checkbox("Show as Percentage of Actual Class (%)", value=False)
+            col_b1, col_b2 = st.columns(2)
+            with col_b1:
+                # F1 Score with Std Error Bars
+                fig_base_f1 = px.bar(
+                    baseline_df.reset_index(),
+                    x="Model",
+                    y="Mean CV F1-Score",
+                    error_y="Std CV F1-Score",
+                    title="Baseline 5-Fold CV F1-Score (with ± 1 Std Error Bars)",
+                    color="Mean CV F1-Score",
+                    color_continuous_scale="Blues",
+                )
+                fig_base_f1.update_layout(yaxis_range=[0, 0.8])
+                st.plotly_chart(fig_base_f1, use_container_width=True)
 
-    with col_cm2:
-        raw_cm = confusion_matrices[selected_cm_model]
-        if cm_norm:
-            display_cm = (raw_cm / raw_cm.sum(axis=1, keepdims=True) * 100).round(1)
-            text_template = "%{z:.1f}%"
-        else:
-            display_cm = raw_cm
-            text_template = "%{z:,}"
+            with col_b2:
+                # Execution Time
+                fig_base_time = px.bar(
+                    baseline_df.reset_index(),
+                    x="Model",
+                    y="CV Execution Time (s)",
+                    title="Baseline 5-Fold Cross-Validation Execution Time (s)",
+                    color="CV Execution Time (s)",
+                    color_continuous_scale="Reds",
+                )
+                st.plotly_chart(fig_base_time, use_container_width=True)
 
-        fig_cm = px.imshow(
-            display_cm,
-            labels=dict(x="Predicted Income Class", y="Actual Income Class", color="Count"),
-            x=["<=50K (0)", ">50K (1)"],
-            y=["<=50K (0)", ">50K (1)"],
-            title=f"Confusion Matrix: {selected_cm_model}",
-            color_continuous_scale="Blues",
+    # ---------------------------------------------------------
+    # TAB 3: HYPERPARAMETER OPTIMIZATION COCKPIT
+    # ---------------------------------------------------------
+    with comp_tabs[2]:
+        st.subheader("Hyperparameter Optimization: GridSearchCV vs. RandomizedSearchCV")
+        st.write(
+            "Both search strategies evaluated complete pipelines using 5-fold Stratified CV optimizing F1-Score. "
+            "Compare optimization yields, validation metrics, and computational budgets."
         )
-        fig_cm.update_traces(text=display_cm, texttemplate=text_template)
-        st.plotly_chart(fig_cm, use_container_width=True)
+
+        if tuning_df is not None:
+            st.dataframe(
+                tuning_df.style.format(
+                    {
+                        "Best CV F1-Score": "{:.4f}",
+                        "CV Accuracy": "{:.4f}",
+                        "CV Precision": "{:.4f}",
+                        "CV Recall": "{:.4f}",
+                        "CV ROC-AUC": "{:.4f}",
+                        "Tuning Time (s)": "{:.2f}",
+                    }
+                )
+                .highlight_max(subset=["Best CV F1-Score", "CV ROC-AUC"], color="#bbf7d0"),
+                use_container_width=True,
+            )
+
+            col_t1, col_t2 = st.columns(2)
+            with col_t1:
+                fig_tune_comp = px.bar(
+                    tuning_df,
+                    x="Model",
+                    y="Best CV F1-Score",
+                    color="Search Method",
+                    barmode="group",
+                    title="Tuning Yield: GridSearchCV vs. RandomizedSearchCV (CV F1)",
+                    color_discrete_map={"GridSearchCV": "#2563eb", "RandomizedSearchCV": "#10b981"},
+                )
+                fig_tune_comp.update_layout(yaxis_range=[0.45, 0.75])
+                st.plotly_chart(fig_tune_comp, use_container_width=True)
+
+            with col_t2:
+                fig_tune_time = px.bar(
+                    tuning_df,
+                    x="Model",
+                    y="Tuning Time (s)",
+                    color="Search Method",
+                    barmode="group",
+                    title="Search Efficiency: Wall-Clock Tuning Duration (s)",
+                    color_discrete_map={"GridSearchCV": "#2563eb", "RandomizedSearchCV": "#10b981"},
+                )
+                st.plotly_chart(fig_tune_time, use_container_width=True)
+
+            st.markdown("#### 🔬 Optimal Hyperparameter Configurations Found")
+            for m_name, meta in best_params_dict.items():
+                with st.expander(f"⚙️ {m_name} (Best via {meta.get('search_method', 'N/A')} — CV F1: {meta.get('best_cv_f1', 0):.4f})"):
+                    st.json(meta.get("best_params", {}))
 
 
 # ---------------------------------------------------------
@@ -737,6 +912,9 @@ def render_model_comparison(metrics_df, confusion_matrices, roc_curves):
 def render_live_predictor(models, preprocessor):
     st.title("🔮 Live Income Prediction Tool")
     st.write("Input individual demographic and employment details to forecast whether annual income exceeds $50,000.")
+
+    best_pipe = load_best_pipeline()
+    best_params_meta = get_best_hyperparameters()
 
     st.warning(
         "⚖️ **Historical Educational Disclaimer**: This model is trained on the 1994 United States Census dataset. "
@@ -835,7 +1013,7 @@ def render_live_predictor(models, preprocessor):
             hours_per_week = st.slider("Hours Worked per Week:", min_value=1, max_value=99, value=40)
             native_country = st.selectbox(
                 "Native Country:",
-                ["United-States", "Other"],
+                ["United-States", "Other", "Canada", "Germany", "Mexico", "Philippines", "India"],
             )
 
         c4, c5 = st.columns(2)
@@ -850,10 +1028,10 @@ def render_live_predictor(models, preprocessor):
 
         st.markdown("### 🤖 Model Selection")
         selected_model_name = st.selectbox(
-            "Select Inference Model:",
+            "Select Inference Model Pipeline:",
             [
-                "Decision Tree (Top Ranked)",
-                "Support Vector Machine",
+                "Support Vector Machine (Top Ranked CV Winner)",
+                "Decision Tree (Top Holdout Test Performer)",
                 "Logistic Regression",
                 "K-Nearest Neighbors",
                 "Naive Bayes",
@@ -863,35 +1041,35 @@ def render_live_predictor(models, preprocessor):
         submit_btn = st.form_submit_button("🚀 Run Income Prediction", use_container_width=True)
 
     if submit_btn:
-        clean_model_key = selected_model_name.replace(" (Top Ranked)", "")
-        clf = models[clean_model_key]
+        clean_model_key = selected_model_name.split(" (")[0]
+        clf_pipeline = models.get(clean_model_key, best_pipe)
 
+        # Raw user input dictionary
         raw_input = {
             "age": age,
-            "workclass": workclass,
             "education_num": education_num,
+            "hours_per_week": hours_per_week,
+            "capital_gain": capital_gain,
+            "capital_loss": capital_loss,
+            "workclass": workclass,
             "marital_status": marital_status,
             "occupation": occupation,
             "relationship": relationship,
             "race": race,
             "sex": sex,
-            "capital_gain": capital_gain,
-            "capital_loss": capital_loss,
-            "hours_per_week": hours_per_week,
             "native_country": native_country,
         }
 
-        # Transform using saved leak-free preprocessor
-        X_input = transform_single_input(raw_input, preprocessor)
+        # Pass raw DataFrame directly into Scikit-learn Pipeline (zero manual outside encoding!)
+        input_df = pd.DataFrame([raw_input])
 
-        # Make prediction
-        pred_class = clf.predict(X_input)[0]
-        if hasattr(clf, "predict_proba"):
-            proba = clf.predict_proba(X_input)[0]
+        # Execute end-to-end Pipeline prediction
+        pred_class = clf_pipeline.predict(input_df)[0]
+        if hasattr(clf_pipeline, "predict_proba"):
+            proba = clf_pipeline.predict_proba(input_df)[0]
             prob_high = proba[1]
             prob_low = proba[0]
         else:
-            # Fallback for models without direct probability
             prob_high = 0.5
             prob_low = 0.5
 
@@ -914,58 +1092,50 @@ def render_live_predictor(models, preprocessor):
             st.write(f"- Probability of **≤ $50K**: **{prob_low*100:.1f}%**")
             st.progress(float(np.clip(prob_high, 0.0, 1.0)))
 
+        # Display optimal hyperparameters used for this prediction
+        if clean_model_key in best_params_meta:
+            m_info = best_params_meta[clean_model_key]
+            st.caption(f"Pipeline: {clean_model_key} | Optimal Search: {m_info.get('search_method')} | Optimal Params: {m_info.get('best_params')}")
+
 
 # ---------------------------------------------------------
 # Page 6: Written Analysis
 # ---------------------------------------------------------
 def render_analysis(metrics_df):
     st.title("📝 Comprehensive Machine Learning Analysis")
-    st.write("Rigorous, empirical analysis based on real benchmark results from all 5 models.")
+    st.write("Rigorous, empirical analysis based on real cross-validation benchmarks and hyperparameter optimization.")
 
     st.markdown(
         """
-        ### 1. Why the Best Model Won: Decision Tree (Rank 1)
-        - **Non-Linear Decision Boundaries**: Tabular demographic datasets are characterized by non-linear step-function thresholds (e.g., earning surges once education surpasses high school, or once age crosses 30 and hours exceed 40). Decision trees capture these orthogonal step thresholds naturally without needing feature interactions to be hand-engineered.
-        - **Robustness to One-Hot Sparsity**: With 51 features created via one-hot encoding, tree algorithms isolate relevant boolean indicators (e.g., `marital_status_Married-civ-spouse`) at root splits without being penalized by sparse zeros.
-        - **Depth Regularization Prevented Overfitting**: Restricting `max_depth=8` and `min_samples_leaf=20` allowed the model to maintain virtually zero generalization gap (**Train Accuracy 86.17% vs Test Accuracy 85.45%**), while training in just **0.05 seconds**.
+        ### 1. Cross-Validation Model Selection & The Real-World Trade-Off
+        - **Why Support Vector Machine (RBF) Won the CV Ranking (F1: 0.6749)**:
+          - By optimizing `C=10.0` with RBF kernel scaling, SVM projected the 51-dimensional one-hot encoded demographic features into Hilbert space, successfully establishing non-linear margin boundaries with low variance across all 5 folds.
+          - During cross-validation on the 26,029 training records, SVM achieved the highest mean F1-Score (**0.6749**) and balanced Precision (**73.88%**) with Recall (**62.14%**).
+        - **Why Decision Tree was an Exceptional Production Contender**:
+          - Decision Tree tuned via GridSearchCV (`min_samples_leaf=30`, `min_samples_split=2`, `criterion='gini'`) achieved **0.6712** CV F1-score (trailing by only 0.0037).
+          - On the completely untouched holdout test partition (6,508 samples), Decision Tree generalized slightly better (**Test F1: 0.6716** vs. **0.6533** for SVM), while taking **0.20s** to train versus **106.97s** for SVM (over **500× faster**).
+          - In business production environments where continuous retraining and microsecond inference latencies are required, the Decision Tree pipeline offers virtually identical accuracy at a fraction of the computational expense.
 
         ---
 
-        ### 2. Why the Worst Model Struggled: Gaussian Naive Bayes (Rank 5)
-        - **Violation of Feature Independence**: Naive Bayes assumes all features are conditionally independent given the class label. In reality, the adult dataset exhibits extreme redundancy and covariance (e.g., `marital_status_Married-civ-spouse` and `relationship_Husband`, or education and occupation).
-        - **Probability Inflation & Poor Precision**: When multiple correlated features point in the same direction, Naive Bayes multiplies their likelihoods, causing extreme over-confidence. Consequently, Naive Bayes predicted positive (>50K) far too aggressively, resulting in an exceptionally low **Precision of 36.10%** and **Test Accuracy of only 58.53%**, despite achieving high Recall (93.62%).
+        ### 2. GridSearchCV versus RandomizedSearchCV Efficiency Analysis
+        - **Computational Efficiency**:
+          - For **Logistic Regression**, RandomizedSearch (`n_iter=5`) discovered the exact same optimal hyperparameter (`C=100.0`, CV F1: 0.6462) as exhaustive GridSearch in **2.46s vs. 7.37s** (3× speedup).
+          - For **Decision Tree**, RandomizedSearch (`n_iter=25`) achieved **0.6669** F1 in **7.61s** compared to **46.77s** for exhaustive 160-candidate GridSearch (0.6712 F1) — capturing 99.4% of the performance in 16% of the wall-clock time.
+          - For **KNN**, both search methods converged on `n_neighbors=11`, `weights='uniform'`, `p=2` (CV F1: 0.6606), with RandomizedSearch reducing tuning time from **197.13s to 122.29s**.
 
         ---
 
-        ### 3. Analysis of Intermediate Models: SVM, Logistic Regression & KNN
-        - **Support Vector Machine (RBF) (Rank 2)**:
-          - Achieved competitive performance (**Test Accuracy 85.06%, F1 0.6524**), effectively projecting the 51 features into Hilbert space to separate non-linear margins.
-          - **Computational Bottleneck**: Required **65.74 seconds** to train (over 1,300× slower than Decision Tree), illustrating the quadratic/cubic scaling penalty of kernel SVMs on medium-to-large datasets.
-        - **Logistic Regression (Rank 3)**:
-          - Solid baseline performer (**Test Accuracy 84.56%, F1 0.6485, ROC-AUC 0.8957**), training in just **0.08 seconds**.
-          - Limited by linear hyperplane constraints: it cannot capture multi-way combinatorial effects without explicit polynomial feature interaction terms.
-        - **K-Nearest Neighbors (Rank 4)**:
-          - Achieved **83.17% Test Accuracy and 0.6380 F1-Score**.
-          - Showed noticeable overfitting (**Train 87.66% vs Test 83.17%**).
-          - Suffered from the **Curse of Dimensionality**: in a 51-dimensional one-hot space, Euclidean distances between points concentrate around similar values, degrading neighbor discriminability.
+        ### 3. Why Gaussian Naive Bayes Struggled (Rank 5)
+        - **Severe Violation of Feature Independence**: Naive Bayes assumes all features are conditionally independent given the class label. In reality, the adult dataset exhibits extreme redundancy (e.g., `marital_status_Married-civ-spouse` and `relationship_Husband`, or education and occupation).
+        - **Probability Inflation & Poor Precision**: Tuning `var_smoothing=1e-08` marginally improved F1 from baseline 0.5227 to 0.5326, but the model remained hindered by high false-positive rates (**Precision of 37.01%** on test data), proving that mathematical assumption violations cannot be resolved through hyperparameter tuning alone.
 
         ---
 
-        ### 4. Algorithm Selection Guide for Tabular Census Data
-        | Algorithm | Strengths | Weaknesses | Best Use Case |
-        |---|---|---|---|
-        | **Decision Tree / Ensembles** | Non-linear splits, handles mixed types, ultra-fast inference | Prone to overfitting if unpruned | Tabular business data, credit scoring, income classification |
-        | **Support Vector Machine (RBF)** | Powerful non-linear margins, robust in clean high-dimensional spaces | Very slow training ($O(n^2)$ to $O(n^3)$), memory heavy | Small-to-medium clean datasets with complex boundaries |
-        | **Logistic Regression** | Interpretable odds ratios, fast training, smooth calibrated probabilities | Strictly linear boundary | Rapid baselines, regulated credit scoring, high-throughput systems |
-        | **K-Nearest Neighbors** | Non-parametric, intuitive instance-based logic | Distance metric deteriorates in high dimensions, slow prediction | Low-dimensional continuous metric spaces |
-        | **Naive Bayes** | Ultra-fast, handles text well | Fails miserably under correlated or one-hot features | Text classification, spam filtering, strictly independent features |
-
-        ---
-
-        ### 5. Project Limitations & Future Engineering Directions
-        - **Hyperparameter Optimization**: Systematic Bayesian search (Optuna) or GridSearchCV across tree depth, SVM C/gamma, and regularization constants.
-        - **Cost-Sensitive Learning / Class Balancing**: Integrating `class_weight='balanced'` or SMOTE to directly address the 76/24 imbalance and boost minority class recall.
-        - **Modern Gradient Boosted Trees**: Benchmarking XGBoost, LightGBM, and CatBoost, which often set the state-of-the-art on tabular census benchmarks.
+        ### 4. Leakage-Free Preprocessing in Scikit-learn Pipelines
+        - Moving all preprocessing into `ColumnTransformer` embedded inside `Pipeline` guarantees that `StandardScaler`, `SimpleImputer`, and `OneHotEncoder` are fit **strictly on training folds during cross-validation**.
+        - Validation folds and test data remain completely unseen until inference.
+        - Saved pipeline artifacts now encapsulate all preprocessing logic, enabling raw dataframes to be passed directly to `pipeline.predict()` with zero manual preprocessing steps and seamless handling of unseen categories.
         """
     )
 

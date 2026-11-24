@@ -1,0 +1,6 @@
+Baseline Rank,Model,Mean CV Accuracy,Mean CV Precision,Mean CV Recall,Mean CV F1-Score,Std CV F1-Score,Mean CV ROC-AUC,Mean Train Accuracy,CV Execution Time (s)
+1,Support Vector Machine,0.8573,0.7544,0.6045,0.6711,0.0145,0.8969,0.8649,192.48
+2,Decision Tree,0.857,0.774,0.5749,0.6595,0.0039,0.9059,0.8607,4.34
+3,K-Nearest Neighbors,0.8401,0.6814,0.6318,0.6557,0.0138,0.8767,0.8755,10.08
+4,Logistic Regression,0.8443,0.7139,0.5897,0.6459,0.0154,0.9005,0.8453,3.57
+5,Naive Bayes,0.5825,0.3608,0.9485,0.5227,0.006,0.847,0.5829,0.58

@@ -1,0 +1,11 @@
+Model,Search Method,Best Hyperparameters,Best CV F1-Score,CV Accuracy,CV Precision,CV Recall,CV ROC-AUC,Tuning Time (s)
+Logistic Regression,GridSearchCV,"{""classifier__C"": 100.0}",0.6462,0.8443,0.7136,0.5905,0.9005,7.37
+Logistic Regression,RandomizedSearchCV,"{""classifier__C"": 100.0}",0.6462,0.8443,0.7136,0.5905,0.9005,2.46
+Decision Tree,GridSearchCV,"{""classifier__criterion"": ""gini"", ""classifier__max_depth"": null, ""classifier__min_samples_leaf"": 30, ""classifier__min_samples_split"": 2}",0.6712,0.8543,0.7354,0.6176,0.9045,46.77
+Decision Tree,RandomizedSearchCV,"{""classifier__min_samples_split"": 20, ""classifier__min_samples_leaf"": 20, ""classifier__max_depth"": null, ""classifier__criterion"": ""gini""}",0.6669,0.8536,0.7381,0.6085,0.9007,7.61
+K-Nearest Neighbors,GridSearchCV,"{""classifier__n_neighbors"": 11, ""classifier__p"": 2, ""classifier__weights"": ""uniform""}",0.6606,0.8432,0.6901,0.6337,0.8877,197.13
+K-Nearest Neighbors,RandomizedSearchCV,"{""classifier__weights"": ""uniform"", ""classifier__p"": 2, ""classifier__n_neighbors"": 11}",0.6606,0.8432,0.6901,0.6337,0.8877,122.29
+Support Vector Machine,GridSearchCV,"{""classifier__C"": 10.0, ""classifier__gamma"": ""scale"", ""classifier__kernel"": ""rbf""}",0.6749,0.8558,0.7388,0.6214,0.8918,399.19
+Support Vector Machine,RandomizedSearchCV,"{""classifier__kernel"": ""rbf"", ""classifier__gamma"": 0.1, ""classifier__C"": 10.0}",0.6725,0.8544,0.7339,0.621,0.8909,271.63
+Naive Bayes,GridSearchCV,"{""classifier__var_smoothing"": 1e-08}",0.5326,0.6014,0.3712,0.9423,0.856,1.75
+Naive Bayes,RandomizedSearchCV,"{""classifier__var_smoothing"": 1e-08}",0.5326,0.6014,0.3712,0.9423,0.856,1.79
