@@ -1,0 +1,6 @@
+Model,Average Precision,Precision (Threshold=0.5),Recall (Threshold=0.5)
+Decision Tree,0.7809,0.7554,0.6046
+Support Vector Machine,0.7517,0.7253,0.5944
+Logistic Regression,0.7387,0.7165,0.5931
+K-Nearest Neighbors,0.691,0.6731,0.6224
+Naive Bayes,0.621,0.3701,0.9267

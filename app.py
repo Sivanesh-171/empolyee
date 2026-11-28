@@ -88,6 +88,39 @@ def get_roc_curves():
     return joblib.load("results/roc_curves.joblib")
 
 
+@st.cache_data
+def get_pr_metrics():
+    """Load precomputed Precision-Recall metrics table."""
+    if os.path.exists("results/precision_recall_metrics.csv"):
+        return pd.read_csv("results/precision_recall_metrics.csv")
+    return None
+
+
+@st.cache_data
+def get_pr_curves():
+    """Load precomputed Precision-Recall curves data."""
+    if os.path.exists("results/pr_curves.joblib"):
+        return joblib.load("results/pr_curves.joblib")
+    return None
+
+
+@st.cache_data
+def get_cv_fold_scores():
+    """Load fold-wise cross-validation scores."""
+    if os.path.exists("results/cv_fold_scores.csv"):
+        return pd.read_csv("results/cv_fold_scores.csv")
+    return None
+
+
+@st.cache_data
+def get_grid_cv_candidates(model_slug):
+    """Load full GridSearchCV candidate evaluations for a specific model."""
+    p = f"results/{model_slug}_grid_cv_results.csv"
+    if os.path.exists(p):
+        return pd.read_csv(p)
+    return None
+
+
 @st.cache_resource
 def load_all_models():
     """Load all 5 pre-trained tuned model pipelines from models directory."""
@@ -900,6 +933,91 @@ def render_model_comparison(metrics_df, confusion_matrices, roc_curves):
             fig_cm.update_traces(text=display_cm, texttemplate=text_template)
             st.plotly_chart(fig_cm, use_container_width=True)
 
+        st.divider()
+
+        # Precision-Recall Curves & Minority Class Detection
+        st.subheader("🎯 Precision-Recall (PR) Curves & Minority-Class Detection (>50K Class)")
+        st.markdown(
+            "Under class imbalance (76% ≤$50K vs 24% >$50K), ROC curves can be overly optimistic because the large volume "
+            "of True Negatives keeps the False Positive Rate low. **Precision-Recall curves** focus strictly on the minority positive class (`>50K`), "
+            "evaluating the direct trade-off between positive predictive value (Precision) and detection capture (Recall)."
+        )
+
+        pr_metrics_df = get_pr_metrics()
+        pr_curves_data = get_pr_curves()
+
+        col_pr1, col_pr2 = st.columns([1.3, 1])
+
+        with col_pr1:
+            if pr_curves_data is not None:
+                fig_pr = go.Figure()
+                prev = pr_curves_data.get("prevalence", 0.2409)
+                fig_pr.add_trace(
+                    go.Scatter(
+                        x=[0, 1],
+                        y=[prev, prev],
+                        mode="lines",
+                        name=f"Baseline Prevalence (AP = {prev:.4f})",
+                        line=dict(dash="dash", color="grey", width=1.5),
+                    )
+                )
+
+                pr_color_map = {
+                    "Decision Tree": "#10b981",
+                    "Support Vector Machine": "#3b82f6",
+                    "Logistic Regression": "#f59e0b",
+                    "K-Nearest Neighbors": "#8b5cf6",
+                    "Naive Bayes": "#ef4444",
+                }
+                for m_name, m_data in pr_curves_data.get("models", {}).items():
+                    fig_pr.add_trace(
+                        go.Scatter(
+                            x=m_data["recall"],
+                            y=m_data["precision"],
+                            mode="lines",
+                            name=f"{m_name} (AP = {m_data['average_precision']:.4f})",
+                            line=dict(color=pr_color_map.get(m_name, "#2563eb"), width=2),
+                        )
+                    )
+
+                fig_pr.update_layout(
+                    title="Holdout Test Precision-Recall Curves (All 5 Tuned Models)",
+                    xaxis_title="Recall (True Positive Rate)",
+                    yaxis_title="Precision (Positive Predictive Value)",
+                    xaxis=dict(range=[0.0, 1.0]),
+                    yaxis=dict(range=[0.0, 1.05]),
+                    legend=dict(x=0.45, y=0.95),
+                    margin=dict(l=20, r=20, t=40, b=20),
+                )
+                st.plotly_chart(fig_pr, use_container_width=True)
+            elif os.path.exists("results/final_precision_recall_curve.png"):
+                st.image("results/final_precision_recall_curve.png", use_container_width=True)
+
+        with col_pr2:
+            st.markdown("#### Average Precision (AP) Benchmark")
+            if pr_metrics_df is not None:
+                st.dataframe(
+                    pr_metrics_df.style.format(
+                        {
+                            "Average Precision": "{:.4f}",
+                            "Precision (Threshold=0.5)": "{:.4f}",
+                            "Recall (Threshold=0.5)": "{:.4f}",
+                        }
+                    ).highlight_max(subset=["Average Precision"], color="#bbf7d0"),
+                    use_container_width=True,
+                    hide_index=True,
+                )
+
+            st.markdown(
+                """
+                **Key Research Insights:**
+                - **Decision Tree (AP: 0.7809)** achieves the highest Average Precision, demonstrating superior capability in ranking true high earners ahead of false positives across all decision thresholds.
+                - **Support Vector Machine (AP: 0.7517)** is second, maintaining clean high-precision boundaries at low-to-medium recall.
+                - **Naive Bayes (AP: 0.6210)** suffers from massive precision collapse due to conditional independence violations.
+                - **Baseline Prevalence Reference (0.2409)**: Any classifier operating along or below this dashed horizontal baseline performs no better than random guessing without discrimination.
+                """
+            )
+
     # ---------------------------------------------------------
     # TAB 2: BASELINE 5-FOLD CROSS-VALIDATION
     # ---------------------------------------------------------
@@ -959,6 +1077,50 @@ def render_model_comparison(metrics_df, confusion_matrices, roc_curves):
                 )
                 st.plotly_chart(fig_base_time, use_container_width=True)
 
+            st.divider()
+
+            # Cross-Validation Stability & Dispersion
+            st.subheader("📦 Cross-Validation Stability & Dispersion (Fold-Wise F1-Score)")
+            st.markdown(
+                "Cross-validation stability assesses how consistently each algorithm performs across different stratified folds. "
+                "A model with a high mean F1 score but wide dispersion carries higher operational variance when deployed in production."
+            )
+
+            cv_folds_df = get_cv_fold_scores()
+            col_box1, col_box2 = st.columns([1.3, 1])
+
+            with col_box1:
+                if os.path.exists("results/cv_stability_boxplot.png"):
+                    st.image("results/cv_stability_boxplot.png", use_container_width=True)
+                elif cv_folds_df is not None:
+                    fig_box = px.box(
+                        cv_folds_df,
+                        x="Model",
+                        y="F1 Score",
+                        color="Model",
+                        points="all",
+                        title="Fold-Wise F1-Score Dispersion Across 5 Folds",
+                    )
+                    st.plotly_chart(fig_box, use_container_width=True)
+
+            with col_box2:
+                st.markdown("#### Fold-Level Scores Table")
+                if cv_folds_df is not None:
+                    pivot_folds = cv_folds_df.pivot(index="Fold", columns="Model", values="F1 Score")
+                    st.dataframe(
+                        pivot_folds.style.format("{:.4f}").highlight_max(axis=1, color="#bbf7d0"),
+                        use_container_width=True,
+                    )
+
+                st.markdown(
+                    """
+                    **Stability Highlights:**
+                    - **Decision Tree** demonstrates the **tightest interquartile range** (Std = ±0.0039, range: 0.6545 – 0.6642), proving remarkable predictability across data partitions.
+                    - **Support Vector Machine** achieves the **highest median F1 (0.6655)** and highest peak fold (0.6983), but exhibits wider fold-to-fold dispersion (Std = ±0.0145).
+                    - **Naive Bayes** exhibits low variance (Std = ±0.0060) but is consistently trapped at low F1 (0.5113 – 0.5272) due to independence violations.
+                    """
+                )
+
     # ---------------------------------------------------------
     # TAB 3: HYPERPARAMETER OPTIMIZATION COCKPIT
     # ---------------------------------------------------------
@@ -1015,6 +1177,104 @@ def render_model_comparison(metrics_df, confusion_matrices, roc_curves):
             for m_name, meta in best_params_dict.items():
                 with st.expander(f"⚙️ {m_name} (Best via {meta.get('search_method', 'N/A')} — CV F1: {meta.get('best_cv_f1', 0):.4f})"):
                     st.json(meta.get("best_params", {}))
+
+            st.divider()
+
+            # Hyperparameter Heatmaps & Parameter Sensitivity Analysis
+            st.subheader("🗺️ Empirical Hyperparameter Heatmaps & Parameter Sensitivity Analysis")
+            st.markdown(
+                "Visualize the actual cross-validation F1 response surface across candidate hyperparameter combinations from exhaustive `GridSearchCV`. "
+                "These empirical heatmaps reveal parameter sensitivities, optimal plateaus, and regularization trade-offs."
+            )
+
+            heatmap_models = {
+                "Support Vector Machine": {
+                    "slug": "svm",
+                    "img": "results/svm_hyperparameter_heatmap.png",
+                    "x_param": "Regularization Parameter C",
+                    "y_param": "Kernel Coefficient gamma",
+                    "desc": (
+                        "Heatmap of Regularization C vs. RBF kernel coefficient gamma. Demonstrates that higher C (10.0) with scale gamma achieves peak F1 (0.6749) "
+                        "by penalizing margin violations on the minority class."
+                    ),
+                },
+                "Decision Tree": {
+                    "slug": "decision_tree",
+                    "img": "results/decision_tree_hyperparameter_heatmap.png",
+                    "x_param": "max_depth",
+                    "y_param": "min_samples_leaf",
+                    "desc": (
+                        "Heatmap of Maximum Tree Depth vs. Minimum Leaf Samples (criterion='gini', min_samples_split=2). Demonstrates that unpruned depth (None) "
+                        "combined with min_samples_leaf=30 provides the optimal balance between tree depth and leaf regularization."
+                    ),
+                },
+                "K-Nearest Neighbors": {
+                    "slug": "knn",
+                    "img": "results/knn_hyperparameter_heatmap.png",
+                    "x_param": "n_neighbors",
+                    "y_param": "weights",
+                    "desc": (
+                        "Heatmap of Number of Neighbors (k) vs. Weighting Function (distance metric p=2). Demonstrates that uniform weighting with k=11 achieves "
+                        "optimal performance (0.6606), outperforming distance weighting in high-dimensional one-hot space."
+                    ),
+                },
+                "Logistic Regression": {
+                    "slug": "logistic_regression",
+                    "img": "results/logistic_regression_hyperparameter_plot.png",
+                    "x_param": "Inverse Regularization Strength C",
+                    "y_param": "Mean CV F1",
+                    "desc": (
+                        "1D parameter sensitivity curve of C vs. Mean CV F1. Shows that F1 plateaus for C >= 1.0, reaching 0.6462 at C=100.0 "
+                        "with minimal sensitivity to further regularization loosening."
+                    ),
+                },
+                "Naive Bayes": {
+                    "slug": "gaussian_nb",
+                    "img": "results/gaussian_nb_hyperparameter_plot.png",
+                    "x_param": "var_smoothing",
+                    "y_param": "Mean CV F1",
+                    "desc": (
+                        "1D curve of Variance Smoothing parameter. Confirms that variance smoothing cannot overcome the severe conditional independence "
+                        "violations inherent in correlated census features."
+                    ),
+                },
+            }
+
+            col_hm_sel, col_hm_view = st.columns([1, 2.5])
+            with col_hm_sel:
+                selected_hm_name = st.selectbox(
+                    "Select Model to Inspect Hyperparameter Surface:",
+                    list(heatmap_models.keys()),
+                )
+                hm_info = heatmap_models[selected_hm_name]
+                st.info(f"**Research Insight:** {hm_info['desc']}")
+                show_raw_candidates = st.checkbox("Show Complete Candidate Results Table", value=False)
+
+            with col_hm_view:
+                if os.path.exists(hm_info["img"]):
+                    st.image(hm_info["img"], use_container_width=True)
+                else:
+                    st.warning(f"Heatmap image not found: {hm_info['img']}")
+
+            if show_raw_candidates:
+                cand_df = get_grid_cv_candidates(hm_info["slug"])
+                if cand_df is not None:
+                    st.markdown(f"#### Complete Candidate Evaluations ({selected_hm_name} — {len(cand_df)} candidates)")
+                    fmt_dict = {
+                        "mean_test_f1": "{:.4f}",
+                        "std_test_f1": "{:.4f}",
+                        "mean_test_accuracy": "{:.4f}",
+                        "mean_test_roc_auc": "{:.4f}",
+                        "mean_fit_time": "{:.2f}",
+                    }
+                    valid_fmt = {k: v for k, v in fmt_dict.items() if k in cand_df.columns}
+                    st.dataframe(
+                        cand_df.style.format(valid_fmt, na_rep="-").highlight_max(
+                            subset=["mean_test_f1"] if "mean_test_f1" in cand_df.columns else None,
+                            color="#bbf7d0",
+                        ),
+                        use_container_width=True,
+                    )
 
 
 # ---------------------------------------------------------

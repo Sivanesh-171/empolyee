@@ -12,6 +12,8 @@ import json
 import pandas as pd
 import numpy as np
 import joblib
+import matplotlib
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import seaborn as sns
 
@@ -25,6 +27,7 @@ from sklearn.tree import DecisionTreeClassifier
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.svm import SVC
 from sklearn.naive_bayes import GaussianNB
+from sklearn.calibration import CalibratedClassifierCV
 from sklearn.metrics import (
     accuracy_score,
     precision_score,
@@ -37,6 +40,14 @@ from sklearn.metrics import (
 )
 
 from preprocess import load_raw_data, clean_data, split_data, create_pipeline
+from research_visualizations import (
+    plot_svm_heatmap,
+    plot_decision_tree_heatmap,
+    plot_knn_heatmap,
+    plot_logistic_regression,
+    plot_gaussian_nb,
+    generate_precision_recall_curves,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -78,9 +89,10 @@ def get_tuning_configurations():
             "has_proba": True,
         },
         "Support Vector Machine": {
-            # Tuned without probability Platt scaling during CV for 5x speedup;
-            # probability=True is restored on final refit for application support.
-            "estimator": SVC(kernel="rbf", probability=False, random_state=42),
+            # Tuned with base SVC for computational efficiency during CV;
+            # CalibratedClassifierCV(..., ensemble=False) is applied on final refit
+            # to provide calibrated probabilities without deprecation warnings.
+            "estimator": SVC(kernel="rbf", random_state=42),
             "param_grid": {
                 "classifier__C": [0.1, 1.0, 10.0],
                 "classifier__gamma": ["scale", 0.01, 0.1],
@@ -181,6 +193,31 @@ def run_grid_and_random_search(X_train, y_train):
         }
         grid_results.append(grid_rec)
         comparison_records.append(grid_rec)
+
+        # Preserve complete candidate GridSearchCV results (Task 2.A)
+        grid_slugs = {
+            "Support Vector Machine": "svm",
+            "Decision Tree": "decision_tree",
+            "K-Nearest Neighbors": "knn",
+            "Logistic Regression": "logistic_regression",
+            "Naive Bayes": "gaussian_nb",
+        }
+        cand_slug = grid_slugs.get(name, name.lower().replace(" ", "_").replace("-", "_"))
+        df_candidates = pd.DataFrame(gs.cv_results_)
+        df_candidates.to_csv(f"results/{cand_slug}_grid_cv_results.csv", index=False)
+        print(f"    Saved full candidate CV results: results/{cand_slug}_grid_cv_results.csv ({len(df_candidates)} candidates)")
+
+        # Generate hyperparameter heatmap / 1D plot (Task 2.B)
+        if name == "Support Vector Machine":
+            plot_svm_heatmap(df_candidates)
+        elif name == "Decision Tree":
+            plot_decision_tree_heatmap(df_candidates)
+        elif name == "K-Nearest Neighbors":
+            plot_knn_heatmap(df_candidates)
+        elif name == "Logistic Regression":
+            plot_logistic_regression(df_candidates)
+        elif name == "Naive Bayes":
+            plot_gaussian_nb(df_candidates)
 
         # ---------------------------------------------------------
         # 2. RandomizedSearchCV
@@ -299,13 +336,14 @@ def select_and_evaluate_final_models(comp_df, best_grid_estimators, best_random_
         else:
             pipe = best_random_estimators[model_name]
 
-        # For SVM, if probability=False was used during fast tuning, enable probability=True
-        # on the final estimator before refitting on full training set so the app has calibrated probabilities.
+        # For SVM, wrap with CalibratedClassifierCV(..., ensemble=False) on the final estimator
+        # before refitting on full training set so the app has calibrated probabilities without deprecation warnings.
         if model_name == "Support Vector Machine":
             clf_params = {k.replace("classifier__", ""): v for k, v in best_params.items()}
-            clf_params["probability"] = True
             clf_params["random_state"] = 42
-            pipe.set_params(classifier=SVC(**clf_params))
+            base_svc = SVC(**clf_params)
+            calibrated_svc = CalibratedClassifierCV(base_svc, ensemble=False)
+            pipe.set_params(classifier=calibrated_svc)
 
         # Refit complete pipeline on the ENTIRE training dataset (26,029 samples)
         print(f"--> Refitting optimal tuned pipeline on full training set: {model_name}...")
@@ -401,6 +439,9 @@ def select_and_evaluate_final_models(comp_df, best_grid_estimators, best_random_
 
     # Generate Final Visualizations
     generate_tuning_visualizations(comp_df, test_metrics_df, all_cms, all_rocs, winner_name)
+
+    # Generate Precision-Recall Curves (Task 1)
+    generate_precision_recall_curves()
 
     return test_metrics_df
 

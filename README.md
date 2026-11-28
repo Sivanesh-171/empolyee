@@ -67,6 +67,7 @@ adult-income-ml/
 │   ├── preprocess.py                      # Leak-free ColumnTransformer & Pipeline definitions
 │   ├── evaluate_baseline.py               # 5-Fold Stratified CV baseline benchmark
 │   ├── tune_models.py                     # GridSearchCV & RandomizedSearchCV tuning engine
+│   ├── research_visualizations.py         # Precision-Recall curves, hyperparameter heatmaps, CV box plots
 │   └── train_models.py                    # Master orchestrator (splits, CV, tuning, test eval)
 ├── models/
 │   ├── best_pipeline.joblib               # Winning Pipeline (Support Vector Machine)
@@ -79,12 +80,27 @@ adult-income-ml/
 ├── results/
 │   ├── baseline_cv_metrics.csv            # 5-Fold CV baseline evaluation results
 │   ├── baseline_detailed_folds.joblib     # Raw per-fold metric arrays
-│   ├── grid_search_results.csv            # Exhaustive GridSearchCV validation log
+│   ├── cv_fold_scores.csv                 # Fold-level F1 scores for all 5 models
+│   ├── cv_stability_boxplot.png           # Boxplot comparing CV stability & dispersion
+│   ├── grid_search_results.csv            # Exhaustive GridSearchCV validation summary
 │   ├── random_search_results.csv          # RandomizedSearchCV validation log
 │   ├── tuned_model_comparison.csv         # Side-by-side Grid vs Random tuning comparison
 │   ├── best_hyperparameters.json          # Optimal parameters selected for each algorithm
 │   ├── final_test_metrics.csv             # Holdout test set evaluation (6,508 records)
 │   ├── metrics.csv                        # Formatted benchmark metrics for Streamlit app
+│   ├── precision_recall_metrics.csv       # Average Precision & threshold metrics
+│   ├── final_precision_recall_curve.png   # Combined PR curve for all 5 models with baseline
+│   ├── pr_curves.joblib                   # Serialized PR curve coordinates
+│   ├── svm_grid_cv_results.csv            # Complete GridSearchCV candidate results for SVM
+│   ├── svm_hyperparameter_heatmap.png     # 2D heatmap of SVM (C vs gamma) CV F1
+│   ├── decision_tree_grid_cv_results.csv  # Complete candidate results for Decision Tree
+│   ├── decision_tree_hyperparameter_heatmap.png # 2D heatmap of Decision Tree CV F1
+│   ├── knn_grid_cv_results.csv            # Complete candidate results for KNN
+│   ├── knn_hyperparameter_heatmap.png     # 2D heatmap of KNN (k vs weights) CV F1
+│   ├── logistic_regression_grid_cv_results.csv # Complete candidate results for Logistic Regression
+│   ├── logistic_regression_hyperparameter_plot.png # 1D plot of C vs CV F1
+│   ├── gaussian_nb_grid_cv_results.csv    # Complete candidate results for Gaussian NB
+│   ├── gaussian_nb_hyperparameter_plot.png # 1D plot of var_smoothing vs CV F1
 │   ├── confusion_matrices.joblib          # Test set confusion matrices for all 5 models
 │   ├── roc_curves.joblib                  # Test ROC curves (FPR, TPR, ROC-AUC)
 │   ├── baseline_f1_comparison.png         # Bar chart: Baseline 5-fold CV F1 with error bars

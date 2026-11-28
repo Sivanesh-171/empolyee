@@ -1,0 +1,26 @@
+Model,Fold,Fold Number,F1 Score
+Decision Tree,Fold 1,1,0.6642
+Decision Tree,Fold 2,2,0.6637
+Decision Tree,Fold 3,3,0.6588
+Decision Tree,Fold 4,4,0.6545
+Decision Tree,Fold 5,5,0.6563
+Support Vector Machine,Fold 1,1,0.6646
+Support Vector Machine,Fold 2,2,0.6557
+Support Vector Machine,Fold 3,3,0.6713
+Support Vector Machine,Fold 4,4,0.6655
+Support Vector Machine,Fold 5,5,0.6983
+Logistic Regression,Fold 1,1,0.6436
+Logistic Regression,Fold 2,2,0.6224
+Logistic Regression,Fold 3,3,0.6412
+Logistic Regression,Fold 4,4,0.6522
+Logistic Regression,Fold 5,5,0.6699
+K-Nearest Neighbors,Fold 1,1,0.644
+K-Nearest Neighbors,Fold 2,2,0.6462
+K-Nearest Neighbors,Fold 3,3,0.651
+K-Nearest Neighbors,Fold 4,4,0.6551
+K-Nearest Neighbors,Fold 5,5,0.6821
+Naive Bayes,Fold 1,1,0.5271
+Naive Bayes,Fold 2,2,0.5113
+Naive Bayes,Fold 3,3,0.5255
+Naive Bayes,Fold 4,4,0.5272
+Naive Bayes,Fold 5,5,0.5223

@@ -10,6 +10,8 @@ import time
 import pandas as pd
 import numpy as np
 import joblib
+import matplotlib
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import seaborn as sns
 
@@ -26,6 +28,7 @@ from sklearn.naive_bayes import GaussianNB
 from sklearn.calibration import CalibratedClassifierCV
 
 from preprocess import load_raw_data, clean_data, split_data, create_pipeline
+from research_visualizations import generate_cv_stability_boxplot
 
 
 def get_baseline_models():
@@ -131,6 +134,7 @@ def run_baseline_cross_validation(X_train, y_train):
 
     # Generate Baseline Visualizations
     generate_baseline_visualizations(baseline_df, detailed_fold_results)
+    generate_cv_stability_boxplot()
 
     return baseline_df, detailed_fold_results
 
